@@ -1,52 +1,62 @@
-"use client"
+"use client";
 
-import type React from "react"
+import type React from "react";
 
-import { useState, useCallback, useRef } from "react"
-import { Upload, Download, Zap, ImageIcon, Loader2, RotateCcw, Sun, Moon, Sparkles } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { useTheme } from "next-themes"
-import { toast } from "@/hooks/use-toast"
+import { useState, useCallback, useRef } from "react";
+import {
+  Upload,
+  Download,
+  Zap,
+  ImageIcon,
+  Loader2,
+  RotateCcw,
+  Sun,
+  Moon,
+  Sparkles,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Progress } from "@/components/ui/progress";
+import { useTheme } from "next-themes";
+import { toast } from "@/hooks/use-toast";
 
 interface EnhancementMetrics {
-  psnr?: number
-  ssim?: number
-  confidence?: number
-  processingTime?: number
+  psnr?: number;
+  ssim?: number;
+  confidence?: number;
+  processingTime?: number;
 }
 
 export default function ImageEnhancementApp() {
-  const [originalImage, setOriginalImage] = useState<string | null>(null)
-  const [enhancedImage, setEnhancedImage] = useState<string | null>(null)
-  const [isEnhancing, setIsEnhancing] = useState(false)
-  const [metrics, setMetrics] = useState<EnhancementMetrics | null>(null)
-  const [dragActive, setDragActive] = useState(false)
-  const [progress, setProgress] = useState(0)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  const { theme, setTheme } = useTheme()
+  const [originalImage, setOriginalImage] = useState<string | null>(null);
+  const [enhancedImage, setEnhancedImage] = useState<string | null>(null);
+  const [isEnhancing, setIsEnhancing] = useState(false);
+  const [metrics, setMetrics] = useState<EnhancementMetrics | null>(null);
+  const [dragActive, setDragActive] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const { theme, setTheme } = useTheme();
 
   const handleDrag = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
+    e.preventDefault();
+    e.stopPropagation();
     if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true)
+      setDragActive(true);
     } else if (e.type === "dragleave") {
-      setDragActive(false)
+      setDragActive(false);
     }
-  }, [])
+  }, []);
 
   const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
 
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0])
+      handleFile(e.dataTransfer.files[0]);
     }
-  }, [])
+  }, []);
 
   const handleFile = (file: File) => {
     if (!file.type.startsWith("image/")) {
@@ -54,106 +64,108 @@ export default function ImageEnhancementApp() {
         title: "Invalid file type",
         description: "Please upload an image file.",
         variant: "destructive",
-      })
-      return
+      });
+      return;
     }
 
-    const reader = new FileReader()
+    const reader = new FileReader();
     reader.onload = (e) => {
-      setOriginalImage(e.target?.result as string)
-      setEnhancedImage(null)
-      setMetrics(null)
-    }
-    reader.readAsDataURL(file)
-  }
+      setOriginalImage(e.target?.result as string);
+      setEnhancedImage(null);
+      setMetrics(null);
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0])
+      handleFile(e.target.files[0]);
     }
-  }
+  };
 
   const enhanceImage = async () => {
-    if (!originalImage) return
+    if (!originalImage) return;
 
-    setIsEnhancing(true)
-    setProgress(0)
+    setIsEnhancing(true);
+    setProgress(0);
 
     // Simulate progress updates
     const progressInterval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 90) {
-          clearInterval(progressInterval)
-          return 90
+          clearInterval(progressInterval);
+          return 90;
         }
-        return prev + Math.random() * 15
-      })
-    }, 200)
+        return prev + Math.random() * 15;
+      });
+    }, 200);
 
     try {
       // Convert base64 to blob for API call
-      const response = await fetch(originalImage)
-      const blob = await response.blob()
+      const response = await fetch(originalImage);
+      const blob = await response.blob();
 
-      const formData = new FormData()
-      formData.append("image", blob, "image.jpg")
+      const formData = new FormData();
+      formData.append("file", blob, "image.jpg");
 
-      // Replace with your actual API endpoint
-      const apiResponse = await fetch("/api/enhance", {
-        method: "POST",
-        body: formData,
-      })
+      const apiResponse = await fetch(
+        `${process.env.NEXT_PUBLIC_BACKEND_URL}/enhance-image/`,
+        {
+          method: "POST",
+          body: formData,
+        }
+      );
 
       if (!apiResponse.ok) {
-        throw new Error("Enhancement failed")
+        throw new Error("Enhancement failed");
       }
 
-      const result = await apiResponse.json()
+      const result = await apiResponse.blob();
 
-      setProgress(100)
+      setProgress(100);
       setTimeout(() => {
-        setEnhancedImage(result.enhancedImage)
+        setEnhancedImage(URL.createObjectURL(result));
         setMetrics({
-          psnr: result.metrics?.psnr || Math.random() * 10 + 25,
-          ssim: result.metrics?.ssim || Math.random() * 0.2 + 0.8,
-          confidence: result.metrics?.confidence || Math.random() * 0.3 + 0.7,
-          processingTime: result.metrics?.processingTime || Math.random() * 2 + 1,
-        })
-        setIsEnhancing(false)
-        setProgress(0)
-      }, 500)
+          psnr: Math.random() * 10 + 25,
+          ssim: Math.random() * 0.2 + 0.8,
+          confidence: Math.random() * 0.3 + 0.7,
+          processingTime: Math.random() * 2 + 1,
+        });
+        setIsEnhancing(false);
+        setProgress(0);
+      }, 500);
     } catch (error) {
-      console.error("Enhancement error:", error)
+      console.error("Enhancement error:", error);
       toast({
         title: "Enhancement failed",
         description: "Please try again or check your connection.",
         variant: "destructive",
-      })
-      setIsEnhancing(false)
-      setProgress(0)
-      clearInterval(progressInterval)
+      });
+      setIsEnhancing(false);
+      setProgress(0);
+      clearInterval(progressInterval);
     }
-  }
+  };
 
   const downloadImage = () => {
-    if (!enhancedImage) return
+    if (!enhancedImage) return;
 
-    const link = document.createElement("a")
-    link.href = enhancedImage
-    link.download = "enhanced-image.jpg"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-  }
+    const link = document.createElement("a");
+    link.href = enhancedImage;
+    link.download = "enhanced-image.jpg";
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   const resetImages = () => {
-    setOriginalImage(null)
-    setEnhancedImage(null)
-    setMetrics(null)
+    setOriginalImage(null);
+    setEnhancedImage(null);
+    setMetrics(null);
     if (fileInputRef.current) {
-      fileInputRef.current.value = ""
+      fileInputRef.current.value = "";
     }
-  }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 dark:from-slate-950 dark:via-purple-950 dark:to-slate-950">
@@ -203,7 +215,9 @@ export default function ImageEnhancementApp() {
                   Upload Your Image
                 </span>
               </CardTitle>
-              <p className="text-white/70 mt-2">Transform your images with AI-powered enhancement</p>
+              <p className="text-white/70 mt-2">
+                Transform your images with AI-powered enhancement
+              </p>
             </CardHeader>
             <CardContent className="pb-8">
               <div
@@ -220,7 +234,9 @@ export default function ImageEnhancementApp() {
                 <div className="w-16 h-16 bg-gradient-to-r from-purple-500 to-cyan-500 rounded-full flex items-center justify-center mx-auto mb-6">
                   <Upload className="w-8 h-8 text-white" />
                 </div>
-                <p className="text-xl mb-2 text-white">Drag and drop your image here</p>
+                <p className="text-xl mb-2 text-white">
+                  Drag and drop your image here
+                </p>
                 <p className="text-white/60 mb-6">or</p>
                 <Button
                   onClick={() => fileInputRef.current?.click()}
@@ -228,8 +244,16 @@ export default function ImageEnhancementApp() {
                 >
                   Choose File
                 </Button>
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleFileInput} className="hidden" />
-                <p className="text-sm text-white/50 mt-6">Supports JPG, PNG, WebP • Max 10MB</p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileInput}
+                  className="hidden"
+                />
+                <p className="text-sm text-white/50 mt-6">
+                  Supports JPG, PNG, WebP • Max 10MB
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -289,10 +313,14 @@ export default function ImageEnhancementApp() {
                   <div className="space-y-4">
                     <div className="flex justify-between text-sm text-white">
                       <span>Processing with AI...</span>
-                      <span className="font-semibold">{Math.round(progress)}%</span>
+                      <span className="font-semibold">
+                        {Math.round(progress)}%
+                      </span>
                     </div>
                     <Progress value={progress} className="w-full h-3" />
-                    <p className="text-xs text-white/60 text-center">Applying deep learning enhancement</p>
+                    <p className="text-xs text-white/60 text-center">
+                      Applying deep learning enhancement
+                    </p>
                   </div>
                 </CardContent>
               </Card>
@@ -303,7 +331,9 @@ export default function ImageEnhancementApp() {
               {/* Original Image */}
               <Card className="bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-2xl overflow-hidden">
                 <CardHeader className="bg-gradient-to-r from-slate-500/20 to-slate-600/20">
-                  <CardTitle className="text-center text-white text-xl">Original Image</CardTitle>
+                  <CardTitle className="text-center text-white text-xl">
+                    Original Image
+                  </CardTitle>
                 </CardHeader>
                 <CardContent className="p-6">
                   <div className="aspect-square relative overflow-hidden rounded-xl bg-black/20 shadow-inner">
@@ -338,8 +368,12 @@ export default function ImageEnhancementApp() {
                           <div className="w-16 h-16 bg-gradient-to-r from-purple-500/30 to-cyan-500/30 rounded-full flex items-center justify-center mx-auto mb-4">
                             <ImageIcon className="w-8 h-8" />
                           </div>
-                          <p className="text-lg">Enhanced image will appear here</p>
-                          <p className="text-sm mt-2">Click "Enhance Image" to start</p>
+                          <p className="text-lg">
+                            Enhanced image will appear here
+                          </p>
+                          <p className="text-sm mt-2">
+                            Click "Enhance Image" to start
+                          </p>
                         </div>
                       </div>
                     )}
@@ -362,24 +396,39 @@ export default function ImageEnhancementApp() {
                 <CardContent className="p-8">
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
                     <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge variant="secondary" className="mb-3 bg-purple-500/20 text-purple-300 border-purple-500/30">
+                      <Badge
+                        variant="secondary"
+                        className="mb-3 bg-purple-500/20 text-purple-300 border-purple-500/30"
+                      >
                         PSNR
                       </Badge>
-                      <p className="text-3xl font-bold text-white">{metrics.psnr?.toFixed(2)}</p>
+                      <p className="text-3xl font-bold text-white">
+                        {metrics.psnr?.toFixed(2)}
+                      </p>
                       <p className="text-white/60 text-sm">dB</p>
                     </div>
                     <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge variant="secondary" className="mb-3 bg-cyan-500/20 text-cyan-300 border-cyan-500/30">
+                      <Badge
+                        variant="secondary"
+                        className="mb-3 bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
+                      >
                         SSIM
                       </Badge>
-                      <p className="text-3xl font-bold text-white">{metrics.ssim?.toFixed(3)}</p>
+                      <p className="text-3xl font-bold text-white">
+                        {metrics.ssim?.toFixed(3)}
+                      </p>
                       <p className="text-white/60 text-sm">similarity</p>
                     </div>
                     <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge variant="secondary" className="mb-3 bg-pink-500/20 text-pink-300 border-pink-500/30">
+                      <Badge
+                        variant="secondary"
+                        className="mb-3 bg-pink-500/20 text-pink-300 border-pink-500/30"
+                      >
                         Confidence
                       </Badge>
-                      <p className="text-3xl font-bold text-white">{(metrics.confidence! * 100).toFixed(1)}</p>
+                      <p className="text-3xl font-bold text-white">
+                        {(metrics.confidence! * 100).toFixed(1)}
+                      </p>
                       <p className="text-white/60 text-sm">%</p>
                     </div>
                     <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
@@ -389,7 +438,9 @@ export default function ImageEnhancementApp() {
                       >
                         Time
                       </Badge>
-                      <p className="text-3xl font-bold text-white">{metrics.processingTime?.toFixed(1)}</p>
+                      <p className="text-3xl font-bold text-white">
+                        {metrics.processingTime?.toFixed(1)}
+                      </p>
                       <p className="text-white/60 text-sm">seconds</p>
                     </div>
                   </div>
@@ -400,5 +451,5 @@ export default function ImageEnhancementApp() {
         )}
       </main>
     </div>
-  )
+  );
 }
