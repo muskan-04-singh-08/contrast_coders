@@ -20,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { useTheme } from "next-themes";
 import { toast } from "@/hooks/use-toast";
+import JSZip from "jszip";
 
 interface EnhancementMetrics {
   psnr?: number;
@@ -29,14 +30,14 @@ interface EnhancementMetrics {
 }
 
 export default function ImageEnhancementApp() {
-  const [originalImage, setOriginalImage] = useState<string | null>(null);
-  const [enhancedImage, setEnhancedImage] = useState<string | null>(null);
+  const { theme, setTheme } = useTheme();
+  const [originalImages, setOriginalImages] = useState<File[]>([]);
+  const [enhancedImages, setEnhancedImages] = useState<string[]>([]);
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [metrics, setMetrics] = useState<EnhancementMetrics | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [progress, setProgress] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { theme, setTheme } = useTheme();
 
   const handleDrag = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -53,43 +54,41 @@ export default function ImageEnhancementApp() {
     e.stopPropagation();
     setDragActive(false);
 
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFile(e.dataTransfer.files[0]);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const files = Array.from(e.dataTransfer.files).filter((file) =>
+        file.type.startsWith("image/")
+      );
+      if (files.length === 0) {
+        toast({
+          title: "Invalid file type",
+          description: "Please upload image files.",
+          variant: "destructive",
+        });
+        return;
+      }
+      setOriginalImages(files);
+      setEnhancedImages([]);
+      setMetrics(null);
     }
   }, []);
 
-  const handleFile = (file: File) => {
-    if (!file.type.startsWith("image/")) {
-      toast({
-        title: "Invalid file type",
-        description: "Please upload an image file.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      setOriginalImage(e.target?.result as string);
-      setEnhancedImage(null);
-      setMetrics(null);
-    };
-    reader.readAsDataURL(file);
-  };
-
   const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      handleFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files).filter((file) =>
+        file.type.startsWith("image/")
+      );
+      setOriginalImages(files);
+      setEnhancedImages([]);
+      setMetrics(null);
     }
   };
 
   const enhanceImage = async () => {
-    if (!originalImage) return;
+    if (originalImages.length === 0) return;
 
     setIsEnhancing(true);
     setProgress(0);
 
-    // Simulate progress updates
     const progressInterval = setInterval(() => {
       setProgress((prev) => {
         if (prev >= 90) {
@@ -101,14 +100,12 @@ export default function ImageEnhancementApp() {
     }, 200);
 
     try {
-      // Convert base64 to blob for API call
-      const response = await fetch(originalImage);
-      const blob = await response.blob();
-
       const formData = new FormData();
-      formData.append("file", blob, "image.jpg");
+      originalImages.forEach((file) => {
+        formData.append("files", file, file.name);
+      });
 
-      const apiResponse = await fetch(
+      const response = await fetch(
         `${process.env.NEXT_PUBLIC_BACKEND_URL}/enhance-image/`,
         {
           method: "POST",
@@ -116,15 +113,21 @@ export default function ImageEnhancementApp() {
         }
       );
 
-      if (!apiResponse.ok) {
-        throw new Error("Enhancement failed");
-      }
+      if (!response.ok) throw new Error("Enhancement failed");
 
-      const result = await apiResponse.blob();
+      const zipBlob = await response.blob();
+      const zip = await JSZip.loadAsync(zipBlob);
+
+      const imageUrls: string[] = [];
+      for (const fileName of Object.keys(zip.files)) {
+        const fileData = await zip.files[fileName].async("blob");
+        const url = URL.createObjectURL(fileData);
+        imageUrls.push(url);
+      }
 
       setProgress(100);
       setTimeout(() => {
-        setEnhancedImage(URL.createObjectURL(result));
+        setEnhancedImages(imageUrls);
         setMetrics({
           psnr: Math.random() * 10 + 25,
           ssim: Math.random() * 0.2 + 0.8,
@@ -148,19 +151,20 @@ export default function ImageEnhancementApp() {
   };
 
   const downloadImage = () => {
-    if (!enhancedImage) return;
-
-    const link = document.createElement("a");
-    link.href = enhancedImage;
-    link.download = "enhanced-image.jpg";
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+    if (enhancedImages.length === 0) return;
+    enhancedImages.forEach((url, i) => {
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `enhanced-${i}.png`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    });
   };
 
   const resetImages = () => {
-    setOriginalImage(null);
-    setEnhancedImage(null);
+    setOriginalImages([]);
+    setEnhancedImages([]);
     setMetrics(null);
     if (fileInputRef.current) {
       fileInputRef.current.value = "";
@@ -203,8 +207,50 @@ export default function ImageEnhancementApp() {
       </header>
 
       <main className="relative z-10 container mx-auto px-4 py-12">
-        {/* Upload Section */}
-        {!originalImage && (
+        <div className="flex flex-wrap items-center justify-center gap-6 pb-6">
+          <Button
+            onClick={enhanceImage}
+            disabled={isEnhancing}
+            size="lg"
+            className="min-w-[160px] bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white border-0 px-8 py-4 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50"
+          >
+            {isEnhancing ? (
+              <>
+                <Loader2 className="w-5 h-5 mr-3 animate-spin" />
+                Enhancing...
+              </>
+            ) : (
+              <>
+                <Zap className="w-5 h-5 mr-3" />
+                Enhance Image{originalImages.length > 1 ? "s" : ""}
+              </>
+            )}
+          </Button>
+
+          {enhancedImages.length > 0 && (
+            <Button
+              onClick={downloadImage}
+              variant="outline"
+              size="lg"
+              className="bg-white/10 border-white/30 hover:bg-white/20 text-white backdrop-blur-sm px-8 py-4 text-lg font-semibold"
+            >
+              <Download className="w-5 h-5 mr-3" />
+              Download All
+            </Button>
+          )}
+
+          <Button
+            onClick={resetImages}
+            variant="outline"
+            size="lg"
+            className="bg-white/10 border-white/30 hover:bg-white/20 text-white backdrop-blur-sm px-8 py-4 text-lg font-semibold"
+          >
+            <RotateCcw className="w-5 h-5 mr-3" />
+            Reset
+          </Button>
+        </div>
+
+        {originalImages.length === 0 && (
           <Card className="max-w-3xl mx-auto bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-2xl">
             <CardHeader className="text-center pb-8">
               <CardTitle className="flex items-center justify-center space-x-3 text-2xl">
@@ -250,6 +296,7 @@ export default function ImageEnhancementApp() {
                   accept="image/*"
                   onChange={handleFileInput}
                   className="hidden"
+                  multiple
                 />
                 <p className="text-sm text-white/50 mt-6">
                   Supports JPG, PNG, WebP • Max 10MB
@@ -260,53 +307,8 @@ export default function ImageEnhancementApp() {
         )}
 
         {/* Image Processing Section */}
-        {originalImage && (
+        {originalImages && (
           <div className="space-y-8">
-            {/* Controls */}
-            <div className="flex flex-wrap items-center justify-center gap-6">
-              <Button
-                onClick={enhanceImage}
-                disabled={isEnhancing}
-                size="lg"
-                className="min-w-[160px] bg-gradient-to-r from-purple-500 to-cyan-500 hover:from-purple-600 hover:to-cyan-600 text-white border-0 px-8 py-4 text-lg font-semibold shadow-lg hover:shadow-xl transition-all duration-300 disabled:opacity-50"
-              >
-                {isEnhancing ? (
-                  <>
-                    <Loader2 className="w-5 h-5 mr-3 animate-spin" />
-                    Enhancing...
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-5 h-5 mr-3" />
-                    Enhance Image
-                  </>
-                )}
-              </Button>
-
-              {enhancedImage && (
-                <Button
-                  onClick={downloadImage}
-                  variant="outline"
-                  size="lg"
-                  className="bg-white/10 border-white/30 hover:bg-white/20 text-white backdrop-blur-sm px-8 py-4 text-lg font-semibold"
-                >
-                  <Download className="w-5 h-5 mr-3" />
-                  Download
-                </Button>
-              )}
-
-              <Button
-                onClick={resetImages}
-                variant="outline"
-                size="lg"
-                className="bg-white/10 border-white/30 hover:bg-white/20 text-white backdrop-blur-sm px-8 py-4 text-lg font-semibold"
-              >
-                <RotateCcw className="w-5 h-5 mr-3" />
-                Reset
-              </Button>
-            </div>
-
-            {/* Progress Bar */}
             {isEnhancing && (
               <Card className="max-w-md mx-auto bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-xl">
                 <CardContent className="pt-6">
@@ -325,128 +327,54 @@ export default function ImageEnhancementApp() {
                 </CardContent>
               </Card>
             )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+              {originalImages.map((file, idx) => {
+                const previewUrl = URL.createObjectURL(file);
+                const enhancedUrl = enhancedImages[idx];
 
-            {/* Image Comparison */}
-            <div className="grid lg:grid-cols-2 gap-8">
-              {/* Original Image */}
-              <Card className="bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-2xl overflow-hidden">
-                <CardHeader className="bg-gradient-to-r from-slate-500/20 to-slate-600/20">
-                  <CardTitle className="text-center text-white text-xl">
-                    Original Image
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="aspect-square relative overflow-hidden rounded-xl bg-black/20 shadow-inner">
-                    <img
-                      src={originalImage || "/placeholder.svg"}
-                      alt="Original"
-                      className="w-full h-full object-contain"
-                    />
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Enhanced Image */}
-              <Card className="bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-2xl overflow-hidden">
-                <CardHeader className="bg-gradient-to-r from-purple-500/20 to-cyan-500/20">
-                  <CardTitle className="text-center text-white text-xl flex items-center justify-center gap-2">
-                    <Sparkles className="w-5 h-5" />
-                    AI Enhanced
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-6">
-                  <div className="aspect-square relative overflow-hidden rounded-xl bg-black/20 shadow-inner">
-                    {enhancedImage ? (
-                      <img
-                        src={enhancedImage || "/placeholder.svg"}
-                        alt="Enhanced"
-                        className="w-full h-full object-contain"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <div className="text-center text-white/60">
-                          <div className="w-16 h-16 bg-gradient-to-r from-purple-500/30 to-cyan-500/30 rounded-full flex items-center justify-center mx-auto mb-4">
-                            <ImageIcon className="w-8 h-8" />
-                          </div>
-                          <p className="text-lg">
-                            Enhanced image will appear here
-                          </p>
-                          <p className="text-sm mt-2">
-                            Click "Enhance Image" to start
-                          </p>
-                        </div>
+                return (
+                  <Card
+                    key={idx}
+                    className="bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-xl overflow-hidden"
+                  >
+                    <CardHeader className="bg-gradient-to-r from-slate-500/20 to-slate-600/20">
+                      <CardTitle className="text-white text-lg text-center truncate">
+                        {file.name}
+                      </CardTitle>
+                    </CardHeader>
+                    <CardContent className="p-4 grid grid-cols-2 gap-4">
+                      <div className="aspect-square relative rounded-lg overflow-hidden bg-black/20">
+                        <img
+                          src={previewUrl}
+                          alt="Original"
+                          className="w-full h-full object-contain"
+                        />
+                        <p className="absolute bottom-1 left-1 text-xs text-white/70 bg-black/40 px-1 rounded">
+                          Original
+                        </p>
                       </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
+                      <div className="aspect-square relative rounded-lg overflow-hidden bg-black/20">
+                        {enhancedUrl ? (
+                          <img
+                            src={enhancedUrl}
+                            alt="Enhanced"
+                            className="w-full h-full object-contain"
+                          />
+                        ) : (
+                          <div className="flex items-center justify-center h-full text-white/50">
+                            <Sparkles className="w-6 h-6 mr-2 animate-pulse" />
+                            Waiting...
+                          </div>
+                        )}
+                        <p className="absolute bottom-1 left-1 text-xs text-white/70 bg-black/40 px-1 rounded">
+                          Enhanced
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
-
-            {/* Metrics */}
-            {metrics && (
-              <Card className="max-w-4xl mx-auto bg-white/10 dark:bg-black/10 backdrop-blur-xl border-white/20 shadow-2xl">
-                <CardHeader className="bg-gradient-to-r from-purple-500/20 to-cyan-500/20">
-                  <CardTitle className="text-center text-white text-2xl flex items-center justify-center gap-3">
-                    <div className="w-8 h-8 bg-gradient-to-r from-purple-500 to-cyan-500 rounded-lg flex items-center justify-center">
-                      <Sparkles className="w-5 h-5 text-white" />
-                    </div>
-                    Enhancement Metrics
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="p-8">
-                  <div className="grid grid-cols-2 lg:grid-cols-4 gap-6">
-                    <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge
-                        variant="secondary"
-                        className="mb-3 bg-purple-500/20 text-purple-300 border-purple-500/30"
-                      >
-                        PSNR
-                      </Badge>
-                      <p className="text-3xl font-bold text-white">
-                        {metrics.psnr?.toFixed(2)}
-                      </p>
-                      <p className="text-white/60 text-sm">dB</p>
-                    </div>
-                    <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge
-                        variant="secondary"
-                        className="mb-3 bg-cyan-500/20 text-cyan-300 border-cyan-500/30"
-                      >
-                        SSIM
-                      </Badge>
-                      <p className="text-3xl font-bold text-white">
-                        {metrics.ssim?.toFixed(3)}
-                      </p>
-                      <p className="text-white/60 text-sm">similarity</p>
-                    </div>
-                    <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge
-                        variant="secondary"
-                        className="mb-3 bg-pink-500/20 text-pink-300 border-pink-500/30"
-                      >
-                        Confidence
-                      </Badge>
-                      <p className="text-3xl font-bold text-white">
-                        {(metrics.confidence! * 100).toFixed(1)}
-                      </p>
-                      <p className="text-white/60 text-sm">%</p>
-                    </div>
-                    <div className="text-center p-4 bg-white/5 rounded-xl backdrop-blur-sm">
-                      <Badge
-                        variant="secondary"
-                        className="mb-3 bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
-                      >
-                        Time
-                      </Badge>
-                      <p className="text-3xl font-bold text-white">
-                        {metrics.processingTime?.toFixed(1)}
-                      </p>
-                      <p className="text-white/60 text-sm">seconds</p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
           </div>
         )}
       </main>
